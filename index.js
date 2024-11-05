@@ -13,9 +13,8 @@ const client2 = Binance.default({
   useServerTime: true
 })
 
-console.log(await client.ping())
-console.log(await client2.time()-Date.now());
-
+console.log(await client.ping());
+console.log(await client2.time()-Date.now()); // разница во времени с биржей
 
 //Развертываем Telegram Bot
 const bot = new Bot(process.env.BOT_API_KEY); 
@@ -35,6 +34,7 @@ let
   newPair,
   orderType,
   quantity,
+  cancelOrder,
   order = {};
 
 const 
@@ -42,12 +42,6 @@ const
     return data.id.some(obj => {    // возвращаем итог поиска по массиву id
       obj.hasOwnProperty(userId); // ищем совпадение в каждом объекте массива
       if (obj.hasOwnProperty(userId)) return true // если совпадает, сразу возвращаем true из функции       
-    });
-  },
-  doesNotificationsExist = (data, userId, whatlooking) => {
-    return data.id.some(obj => {    // возвращаем итог поиска
-      const cloneObject = Object.assign({}, obj[userId]); //клонируем полученный объект для последующей работы
-      if (cloneObject.hasOwnProperty(whatlooking)) return true //если в объекте есть уведомления возвращаем true из функции     
     });
   },
   pullOutPairPrice = (data, userId, whereFind) => {//вытаскиваем пару и цену
@@ -96,17 +90,20 @@ const
                     }                 
                   }
                   if (orderDelete) {
-                    try {
-                      const cancelOrder = await client2.cancelOrder({ // отменяем на бирже
-                        symbol: data.id[i][f][j][k][t].symbol,
-                        orderId: data.id[i][f][j][k][t].orderId,
-                      })
-                      data.id[i][f][j].splice(target-1, 1);
-                      await fs.writeJson('./db.json', data); // перезапись файла
-                      console.log(cancelOrder); 
-                    } catch (err){
-                      console.error(err)
-                      console.log('error when canceling an order')
+                    if (k == target-1) {
+                      console.log(data.id[i][f][j][target-1][t].orderId);
+                      try {
+                        cancelOrder = await client2.cancelOrder({ // отменяем на бирже
+                          symbol: data.id[i][f][j][target-1][t].symbol,
+                          orderId: data.id[i][f][j][target-1][t].orderId,
+                        })
+                        data.id[i][f][j].splice(target-1, 1);
+                        await fs.writeJson('./db.json', data); // перезапись файла
+                        console.log(cancelOrder); 
+                      } catch (err){
+                        console.error(err)
+                        console.log('error when canceling an order')
+                      }
                     }
                   }
                 }                
@@ -116,40 +113,24 @@ const
         }
       }
     }   
+  },
+  resettingValues = () => { // сброс переменных
+    notificationPair = false,
+    notificationPrice = false,
+    notificationDelete = false,
+    notificationEdite = false,
+    orderDelete = false,
+    dataBase = {}, 
+    dataMassive = [],
+    orderMassive = [],
+    orderPair = false,
+    orderPairPrice = false,
+    quantityToken = false,
+    newPair = undefined,
+    orderType = undefined,
+    quantity = undefined,
+    order = {};
   }
-
-  
-
-
-
-/* const data = await fs.readJson('./db.json', { throws: false });
-for (let i = 0; i < data.id.length; i++) {
-  for (let f in data.id[i]) {
-    if (+f == 434059210) {
-      for (let j in data.id[i][f]) {
-                          
-          for (let k = 0; k < data.id[i][f][j].length; k++) {
-            for (let t in data.id[i][f][j][k]) {   
-              if (data.id[i][f].orders !== '[]') {
-                console.log('no')
-                
-
-                console.log(data.id[i][f].orders[0])
-
-
-
-              }  
-            }                
-          }
-         
-      }
-    }
-  }
-} */
-  
-
-
-
 
 
 bot.command('start', async (ctx) => {  
@@ -157,7 +138,7 @@ bot.command('start', async (ctx) => {
     const data = await fs.readJson('./db.json', { throws: false });
     let id = {}; 
     dataBase.id = [];    
-    id[ctx.from.id] = {};   
+    id[ctx.from.id] = {"notifications": [], "orders": []}; //создаем структуру объекта
     if (data == null) {  //файл пустой, записываем новый id 
       console.log('data == null')   
       dataBase.id.push(id);
@@ -178,14 +159,7 @@ bot.command('start', async (ctx) => {
   } catch (err) {
     console.error(err)
   }
-
-  notificationPair = false;
-  notificationPrice = false;
-  notificationDelete = false;  
-  newPair = undefined;
-  orderType = undefined; 
-  quantity = undefined; 
-  orderPairPrice = false; 
+  resettingValues();
   const start_keyboard = new InlineKeyboard().text('place an order', 'order').text('set up a notification', 'notification');  
   await ctx.reply('Hello, With the help of this bot, when you reach a certain price of a cryptocurrency trading pair, you can send yourself a notification or immediately buy, having previously placed an order here.\n\nManage your balance without leaving Telegram.', {
       parse_mode: 'HTML',
@@ -193,14 +167,7 @@ bot.command('start', async (ctx) => {
   });           
 });
 bot.command('managing', (ctx) => {  
-  notificationPair = false;
-  notificationPrice = false;
-  notificationDelete = false; 
-  notificationEdite = false;
-  newPair = undefined;
-  orderType = undefined; 
-  quantity = undefined; 
-  orderPairPrice = false;
+  resettingValues();
   const managing_keyboard = new InlineKeyboard().text('Orders', 'managing-order').text('Notifications', 'managing-notification'); 
   ctx.reply('what do you want to edit?', {
     reply_markup: managing_keyboard
@@ -223,30 +190,33 @@ bot.callbackQuery(['notification'], async (ctx) => {
   await ctx.answerCallbackQuery('set up a notification');  
   await ctx.reply('ok, write a trading pair, observing the format, for example "BTCUSDT" (without quotes)'); 
 });
-bot.callbackQuery(['write-a-price'], async (ctx) => { 
-  notificationPrice = true;
-  await ctx.answerCallbackQuery('set up a notification');  
-  await ctx.reply(`Below, write the price for <b>${newPair}</b> for which you need an alert`, {parse_mode: 'HTML'})
-});
 bot.callbackQuery(['managing-notification'], (ctx) => { 
-  ctx.answerCallbackQuery('Notification management');  
+  ctx.answerCallbackQuery('Notification management'); 
+  const managing_notification_keyboard = new InlineKeyboard().text('Edit ', 'edit-notification').text('Delete', 'delete-notification'); 
   fs.readJson('./db.json', { throws: false })
-  .then(data => {    
-    if (doesNotificationsExist(data, ctx.from.id, 'notifications')) { // проверка на наличие уведомлений
-      const managing_notification_keyboard = new InlineKeyboard().text('Edit ', 'edit-notification').text('Delete', 'delete-notification'); 
-      fs.readJson('./db.json')
-      .then(async data => {
-        pullOutPairPrice(data, ctx.from.id, 'notifications'); 
-        await ctx.reply(`Below is a list of active notifications.\n${dataMassive.join('')}\nTo begin editing or deleting, select an action and then write which pair you want to change.`, {
-          reply_markup: managing_notification_keyboard
-        });
-      })        
-      .catch(err => {
-        console.error(err)
-      })  
-    } else {ctx.reply(`you don't have any active notifications`);} 
+  .then(async data => { 
+    try {
+      for (let i = 0; i < data.id.length; i++) {
+        for (let f in data.id[i][ctx.from.id]) {
+          if (f == 'notifications') {
+            if (data.id[i][ctx.from.id].notifications.length > 0) { //проверка наличия уведомлений
+              pullOutPairPrice(data, ctx.from.id, 'notifications'); 
+              await ctx.reply(`Below is a list of active notifications.\n${dataMassive.join('')}\nTo begin editing or deleting, select an action and then write which pair you want to change.`, {
+                reply_markup: managing_notification_keyboard
+              });     
+            } else {
+              await ctx.reply(`you don't have any active notifications`); 
+            }
+          } 
+        }  
+      }
+    } catch (err) {
+      console.error(err)
+      console.log('2: err read db file')
+    } 
   })
   .catch(err => {
+    console.log('3: err read db file')
     console.error(err) 
   });  
   
@@ -297,63 +267,49 @@ bot.callbackQuery(['confirmation'], async (ctx) => {
     console.log('error when placing an order on the exchange')
   }
   const data = await fs.readJson('./db.json', { throws: false });
-  if (doesNotificationsExist(data, ctx.from.id, 'orders')) { // если ордера в базе есть, то вкладываем в уже существующий массив
-    console.log('the orders is present')
-
-    for (let i = 0; i < data.id.length; i++) {
-      for (let key in data.id[i]) {
-        if (+key == ctx.from.id) {
-          data.id[i][ctx.from.id].orders.push({order});
-          try {
-            await fs.writeJson('./db.json', data); //записываем
-            await ctx.reply(`New order is placed on the exchange. Viewing and deleting is available via the /managing command`); 
-            console.log('file be updated')
-          }
-          catch (err) {
-          console.log('the file could not be updated')
-          console.error(err)
-          }
+  for (let i = 0; i < data.id.length; i++) {
+    for (let key in data.id[i]) {
+      if (+key == ctx.from.id) {
+        data.id[i][ctx.from.id].orders.push({order}); //помещаем новый ордер в объект
+        try {
+          await fs.writeJson('./db.json', data); //записываем
+          await ctx.reply(`New order is placed on the exchange. Viewing and deleting is available via the /managing command`); 
+          console.log('file be updated')
         }
-      } 
-    }
-  }
+        catch (err) {
+        console.log('the file could not be updated')
+        console.error(err)
+        }
+      }
+    } 
+  }  
 });
-bot.callbackQuery(['managing-order'], async (ctx) => { 
-  console.log('1') 
+bot.callbackQuery(['managing-order'], async (ctx) => {
+  await ctx.answerCallbackQuery('Orders'); 
   try {
     const data = await fs.readJson('./db.json', { throws: false });
-    console.log('1.1') 
-    console.log(data.id.length) 
     for (let i = 0; i < data.id.length; i++) {
-      for (let f in data.id[i]) {
-        console.log('2') 
-        console.log(data.id[ctx.from.id][f].orders.length !== 0)
-        pullOutPairPrice(data, ctx.from.id, 'orders')
-        await ctx.answerCallbackQuery('BUY');  
-        await ctx.reply(`Your active orders are below.\nTo <b>delete</b> one of them, write an ordinal number, for example "1".\n\n${orderMassive.join('')}`, {
-          parse_mode: 'HTML'
-        });
+      for (let f in data.id[i][ctx.from.id]) {
+        if (f == 'orders') {
+          if (data.id[i][ctx.from.id].orders.length > 0) { //проверка наличия ордеров
+            pullOutPairPrice(data, ctx.from.id, 'orders')
+            await ctx.reply(`Your active orders are below.\nTo <b>DELETE</b> one of them, write an ordinal number, for example "1".\n\n${orderMassive.join('')}`, {
+              parse_mode: 'HTML'
+            });
+            orderDelete = true;      
+          } else {await ctx.reply(`you don't have any active orders`);}
+        } 
       }  
-    } 
-    
-/*     if (data.id[i][f].orders.length !== 0) {
-       
-    } else {
-      await ctx.reply(`you don't have any active orders`); 
-    } */
-
+    }
   } catch (err) {
     console.error(err)
     console.log('file reading error')
   }
-  orderDelete = true;
-
 });
 
 
-
 bot.on('message', async (ctx) => {      
-  if (notificationPair) {
+  if (notificationPair) { // определяем пару с которой работаем
     //наименование редактируемой пары
     newPair = ctx.update.message.text; 
     try {
@@ -362,70 +318,48 @@ bot.on('message', async (ctx) => {
       //приводит к числу
       let pricePair = +prices[newPair]; 
       //информация о текущей цене
-      const price_keyboard = new InlineKeyboard().text('Write a price', 'write-a-price');      
-      await ctx.reply(`Current price ${exchangeInfo.symbols[0].baseAsset}: ${pricePair.toFixed(2)} ${exchangeInfo.symbols[0].quoteAsset}\n<b>To set the price</b> for the notification, <b>click "Write a price</b>"`, {
-        parse_mode: 'HTML',        
-        reply_markup: price_keyboard
+      await ctx.reply(`Current price ${exchangeInfo.symbols[0].baseAsset}: ${pricePair.toFixed(2)} ${exchangeInfo.symbols[0].quoteAsset}\nBelow, write the price for <b>${newPair}</b> for which you need an alert`, {
+        parse_mode: 'HTML', 
     });
-    notificationPair = false;      
+    notificationPair = false; 
+    notificationPrice = true;     
     } catch (error) {    
       // Обработка ошибок  
       console.error('Error in getting the price.', error); 
       await ctx.reply(`Error in getting the price. ${error}`, error);      
     }
   }  
-  if (notificationPrice) {    
-    //читаем базу, проверяем факт наличия уведомлений
+  else if (notificationPrice) {   // определяем цену для пары и записываем данные в объект
     fs.readJson('./db.json', { throws: false })
     .then(async data => {
-      if (doesNotificationsExist(data, ctx.from.id, 'notifications')) { //уведомления есть, вкладываем новые в существующий массив
-        console.log('the notifications already exists');
-        try {          
-          for (let i = 0; i < data.id.length; i++) {
-            for (let key in data.id[i]) {
-              if (+key == ctx.from.id) {
-                data.id[i][ctx.from.id].notifications.push({[newPair]: +ctx.update.message.text}); //помещаем новую пару в массив
-                EditeDelitePairPrice(data, ctx.from.id, 'notifications', newPair, +ctx.update.message.text);
-
-                await fs.writeJson('./db.json', data); //записываем
-                await ctx.reply(`A new notification has been installed for ${newPair}, it will work when the price reaches ${ctx.update.message.text}\n\nActive notifications can be managed via the /managing command\nTo record another notification, use the /start command`);
-              }
-            } 
+      try {          
+        for (let i = 0; i < data.id.length; i++) {
+          for (let key in data.id[i]) {
+            if (+key == ctx.from.id) { // находим объект с id пользователя
+              data.id[i][ctx.from.id].notifications.push({[newPair]: +ctx.update.message.text}); //помещаем новую пару в массив
+              EditeDelitePairPrice(data, ctx.from.id, 'notifications', newPair, +ctx.update.message.text);
+              await fs.writeJson('./db.json', data); //записываем
+              await ctx.reply(`A new notification has been installed for ${newPair}, it will work when the price reaches ${ctx.update.message.text}\n\nActive notifications can be managed via the /managing command\nTo record another notification, use the /start command`);
+            }
           } 
-        } catch (err) {
-          console.error(err)
-        }
-      } else { //уведомлений нет, создаем массив "notification" в объекте 
-        fs.readJson('./db.json')
-        .then(async data => {  
-          for (let i = 0; i < data.id.length; i++) {
-            for (let key in data.id[i]) {
-              if (+key == ctx.from.id) {
-                data.id[i][ctx.from.id].notifications = [{[newPair]: +ctx.update.message.text}]; //создаем массив "notification"                
-                await fs.writeJson('./db.json', data);
-                await ctx.reply(`A new notification has been installed for ${newPair}, it will work when the price reaches ${ctx.update.message.text}\n\nActive notifications can be managed via the /managing command`);
-              }
-            } 
-          }
-        })
-        .catch(err => {
-          console.error(err)
-        });        
-      }      
+        } 
+      } catch (err) {
+        console.log('1: error in recording notifications');
+        console.error(err)
+      }    
     })
     .catch(err => {
       console.error(err)
     })
-    .finally(() => {
+    .finally(() => { //сбрасываем переменные
       notificationPrice = false;
       newPair = undefined;      
     });   
   } 
-  if (notificationDelete) {
-    //читаем, что сейчас есть в базе
+  else if (notificationDelete) { //удаление уведомлений
     fs.readJson('./db.json')
     .then(async data => {
-      EditeDelitePairPrice(data, ctx.from.id, 'notifications', ctx.update.message.text);
+      EditeDelitePairPrice(data, ctx.from.id, 'notifications', ctx.update.message.text); //всё происходит в этой функции
       await ctx.reply(`The notification for the ${ctx.update.message.text} pair has been deleted`);
     })
     .catch(err => {
@@ -435,18 +369,18 @@ bot.on('message', async (ctx) => {
       notificationDelete = false;
     }); 
     } 
-  if (notificationEdite) {
+  else if (notificationEdite) {//редактирование уведомлений
     fs.readJson('./db.json')
     .then( async data => {
-      EditeDelitePairPrice(data, ctx.from.id, 'notifications', ctx.update.message.text);      
+      EditeDelitePairPrice(data, ctx.from.id, 'notifications', ctx.update.message.text);  //всё происходит в этой функции     
       await ctx.reply(`Enter the new price for ${ctx.update.message.text}`);
     })
     .catch(err => {
       console.error(err)
     })
   }
-  else if (orderPair) {
-    newPair = ctx.update.message.text;
+  else if (orderPair) { // наименование торговой пары
+    newPair = ctx.update.message.text; //собираем инфо о наименовании
     const exchangeInfo = await client.exchangeInfo({ symbol: newPair }); // Получаем инфо о парах
     await ctx.reply(`Enter the amount of <b>${exchangeInfo.symbols[0].baseAsset}</b> to purchase.`, {
       parse_mode: 'HTML',
@@ -454,16 +388,15 @@ bot.on('message', async (ctx) => {
     orderPair = false;
     quantityToken = true;   
   }
-  else if (quantityToken) {
+  else if (quantityToken) { // собираем данные о количестве монет
     quantity = ctx.update.message.text.replace(",", ".");
-    parseFloat(quantity);
     await ctx.reply(`Write the price of the <b>${newPair}</b> order`, {
       parse_mode: 'HTML'
     }); 
     quantityToken = false;
     orderPairPrice = true; 
   }
-  else if (orderPairPrice) {
+  else if (orderPairPrice) { // цена ордера
     const сonfirm_keyboard = new InlineKeyboard().text('Confirm', 'confirmation');
     await ctx.reply(`Check if everything is in order:\n\nTrading pair: ${newPair}\nOrder type: ${orderType}\nQuantity: ${quantity}\nPrice: ${+ctx.update.message.text}`, {
       parse_mode: 'HTML',
@@ -472,27 +405,24 @@ bot.on('message', async (ctx) => {
     
     order.symbol = newPair; //помещаем новую пару в массив
     order.side = orderType; //тип ордера
-    order.quantity = quantity; //Количество токенов для сделки
-    order.price = +ctx.update.message.text; // 
+    order.quantity = +quantity; //Количество токенов для сделки
+    order.price = +ctx.update.message.text; // цена
 
     newPair = undefined;
     orderType = undefined; 
     quantity = undefined; 
     orderPairPrice = false;
   }
-  else if (orderDelete) {
-    const data = await fs.readJson('./db.json', { throws: false });
-    console.log(data.id[i][f].orders.length !== 0)
-    await EditeDelitePairPrice(data, ctx.from.id, 'orders', +ctx.update.message.text);  
-    await ctx.reply(`order is cancel`); // подтверждаем удаление пользователю  
+  else if (orderDelete) { //удаление ордера
+    const data = await fs.readJson('./db.json', { throws: false });  
+    await EditeDelitePairPrice(data, ctx.from.id, 'orders', +ctx.update.message.text); //всё происходит тут 
+    await ctx.reply(`The order has been cancelled, the information is below.\n\nPair: ${cancelOrder.symbol}\nOrder type: ${cancelOrder.side}\nQuantity: ${cancelOrder.origQty}\nPrice: ${cancelOrder.price}\nStatus: <b>${cancelOrder.status}</b>`, {
+      parse_mode: 'HTML' 
+    }); // подтверждаем удаление пользователю
+    console.log()  
     orderDelete = false;    
   }
-  else {
-    const data = await fs.readJson('./db.json', { throws: false });
-    console.log(data.id[ctx.from.id].orders)
-
-    console.log('test')
-  } 
+  else {console.log('the input is not recognized')} 
 });  
 
 //проверка цен с помощью вебсокетов(удержание соединения)
@@ -599,9 +529,7 @@ fs.readJson('./db.json')
   
 }, 60000); */
 
-
 bot.start();
-
 
 // Enable graceful stop
 process.once('SIGINT', () => bot.stop('SIGINT'));
