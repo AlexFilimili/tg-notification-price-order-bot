@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "async-mutex": "^0.5.0",
     "binance-api-node": "^0.12.7",
     "dotenv": "^16.4.5",
     "fs-extra": "^11.2.0",
