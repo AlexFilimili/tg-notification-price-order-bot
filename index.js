@@ -37,7 +37,10 @@ bot.use(session({ initial: () => ({
   orderType: undefined,
   quantity: undefined,
   cancelOrder: undefined,
-  order: {}
+  order: {},
+  publicApiKey: false,
+  secretApiKey: false,
+  tgApiKey: false
   }) 
 }));
 
@@ -133,7 +136,10 @@ const
     ctx.session.newPair = undefined,
     ctx.session.orderType = undefined,
     ctx.session.quantity = undefined,
-    ctx.session.order = {};
+    ctx.session.order = {},
+    ctx.session.publicApiKey = false,
+    ctx.session.secretApiKey = false,
+    ctx.session.tgApiKey = false
   };
 
 
@@ -190,21 +196,32 @@ bot.command('managing', (ctx) => {
     reply_markup: managing_keyboard
   });          
 });
+bot.command('setapikey', (ctx) => {  
+  resettingValues(ctx);
+  const api_keyboard = new InlineKeyboard().text('Public', 'public-key').text('Secret', 'secret-key').text('TG', 'tg-key'); 
+  ctx.reply('Select the API key to install', {
+    reply_markup: api_keyboard
+  }); 
+});
 bot.api.setMyCommands([
   {
-  command: 'start',
-  description: 'setting up notifications and orders'
+    command: 'start',
+    description: 'setting up notifications and orders'
   },
   {
-  command: 'managing',
-  description: 'viewing and editing notifications and orders'
+    command: 'managing',
+    description: 'viewing and editing notifications and orders'
+  },
+  {
+    command: 'setapikey',
+    description: 'install API keys'
   }
 ]);
 
 
-bot.callbackQuery(['notification'], async (ctx) => { 
+bot.callbackQuery(['notification'], async (ctx) => {
   ctx.session.notificationPair = true;
-  await ctx.answerCallbackQuery('set up a notification');  
+  await ctx.answerCallbackQuery('set up a notification'); 
   await ctx.reply('ok, write a trading pair, observing the format, for example "BTCUSDT" (without quotes)'); 
 });
 bot.callbackQuery(['managing-notification'], (ctx) => { 
@@ -328,6 +345,31 @@ bot.callbackQuery(['managing-order'], async (ctx) => {
     console.log('file reading error')
   }
 });
+bot.callbackQuery(['public-key'], async (ctx) => { 
+  ctx.session.publicApiKey = true;
+  await ctx.answerCallbackQuery('Public');  
+  await ctx.reply('Insert the <b>public</b> API key from Binance', {
+    parse_mode: 'HTML'
+  });
+  ctx.session.publicApiKey = true; 
+});
+bot.callbackQuery(['secret-key'], async (ctx) => { 
+  ctx.session.secretApiKey = true;
+  await ctx.answerCallbackQuery('Secret');  
+  await ctx.reply('Insert the <b>secret</b> API key from Binance', {
+    parse_mode: 'HTML'
+  });
+  ctx.session.secretApiKey = true; 
+});
+bot.callbackQuery(['tg-key'], async (ctx) => { 
+  ctx.session.tgApiKey = true;
+  await ctx.answerCallbackQuery('Telegram');  
+  await ctx.reply('Insert the <b>telegram</b> API key from @Botfather', {
+    parse_mode: 'HTML'
+  });
+  ctx.session.tgApiKey = true; 
+});
+
 
 
 bot.on('message', async (ctx) => {      
@@ -460,9 +502,32 @@ bot.on('message', async (ctx) => {
       parse_mode: 'HTML' 
     }); // подтверждаем удаление пользователю
     console.log()  
-    ctx.session.orderDelete = false;    
+    ctx.session.orderDelete = false;     
   }
-  else {console.log('the input is not recognized')} 
+  //установка API ключа 
+  else if (ctx.session.publicApiKey) {   
+    let envContent = await fs.readFile('./.env', "utf-8")
+    const updatedContent = envContent.replace(/^BINACE_API_KEY=.*/m, `BINACE_API_KEY=${ctx.update.message.text}`);
+    await fs.writeFile('./.env', updatedContent);
+    await ctx.reply(`The public api key is installed`);
+    ctx.session.publicApiKey = false;     
+  }
+  else if (ctx.session.secretApiKey) {   
+    let envContent = await fs.readFile('./.env', "utf-8")
+    const updatedContent = envContent.replace(/^BINACE_API_SECRET=.*/m, `BINACE_API_SECRET=${ctx.update.message.text}`);
+    await fs.writeFile('./.env', updatedContent);
+    await ctx.reply(`The secret api key is installed`);
+    ctx.session.secretApiKey = false;     
+  }
+  else if (ctx.session.tgApiKey) {   
+    let envContent = await fs.readFile('./.env', "utf-8")
+    const updatedContent = envContent.replace(/^BOT_API_KEY=.*/m, `BOT_API_KEY=${ctx.update.message.text}`);
+    await fs.writeFile('./.env', updatedContent);
+    await ctx.reply(`The telegram api key is installed`);
+    ctx.session.tgApiKey = false;     
+  }
+  else {console.log('the input is not recognized');} 
+  
 });  
 
 //проверка цен ордеров и уведомлений с помощью сокетов (удержание соединения)
